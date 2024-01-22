@@ -6,14 +6,18 @@ import (
 )
 
 type CycleMap[K cmp.Ordered, V any] struct {
-	keys   []K
-	mapVal map[K]V
-	index  int
-	isSafe bool
-	mu     *sync.Mutex
-	size   int
+	keys             []K
+	mapVal           map[K]V
+	index            int
+	isSafe           bool
+	mu               *sync.Mutex
+	size             int
+	ListenRemoveFunc func(k K, v V)
 }
 
+func (c *CycleMap[K, V]) SetListenRemoveFunc(f func(k K, v V)) {
+	c.ListenRemoveFunc = f
+}
 func (c *CycleMap[K, V]) GetOrAdd(k K, f func() V) V {
 	if c.isSafe {
 		c.mu.Lock()
@@ -56,7 +60,12 @@ func (c *CycleMap[K, V]) Set(k K, v V) {
 	}
 	c.set(k, v)
 }
-
+func (c *CycleMap[K, V]) Iter() *cyclemapIterator[K, V] {
+	return &cyclemapIterator[K, V]{
+		cmap:  c,
+		index: -1,
+	}
+}
 func (c *CycleMap[K, V]) set(k K, v V) {
 	if _, ok := c.mapVal[k]; ok {
 		c.mapVal[k] = v
@@ -68,7 +77,12 @@ func (c *CycleMap[K, V]) set(k K, v V) {
 			c.index = 0
 		}
 		oldK := c.keys[c.index]
-		delete(c.mapVal, oldK)
+		if _, ok := c.mapVal[oldK]; ok {
+			if c.ListenRemoveFunc != nil {
+				c.ListenRemoveFunc(oldK, c.mapVal[oldK])
+			}
+			delete(c.mapVal, oldK)
+		}
 		c.keys[c.index] = k
 		c.mapVal[k] = v
 		return
